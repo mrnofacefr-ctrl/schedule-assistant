@@ -1,0 +1,91 @@
+"""
+main.py
+-------
+FastAPI web app. Serves a single-page chat UI (static/index.html) and a
+/api/chat endpoint that drives the agent. Session history is kept
+server-side in memory, keyed by a session_id the browser generates.
+
+Run locally:  uvicorn app.main:app --reload --port 8000
+"""
+
+import os
+from pathlib import Path
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+
+from app import db, data_generator, vector_store
+from app.agent import run_agent
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+app = FastAPI(title="Agentic RAG Schedule Assistant")
+
+app.add_middleware(
+    CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
+)
+
+# in-memory per-session conversation history (fine for a demo/assignment;
+# swap for redis/db-backed sessions for real multi-user production use)
+_SESSIONS: dict[str, list] = {}
+
+
+@app.on_event("startup")
+def startup():
+    db.init_db()
+    entries = db.get_all_entries()
+    if not entries:
+        data_generator.seed_database(reset=True)
+        entries = db.get_all_entries()
+    # (Re)build the vector index from the source of truth on boot.
+    vector_store.sync_from_db(entries)
+
+
+class ChatRequest(BaseModel):
+    message: str
+    session_id: str = "default"
+
+
+class ChatResponse(BaseModel):
+    reply: str
+    tool_trace: list
+
+
+@app.post("/api/chat", response_model=ChatResponse)
+def chat(req: ChatRequest):
+    if not req.message.strip():
+        raise HTTPException(400, "message cannot be empty")
+    history = _SESSIONS.get(req.session_id, [])
+    try:
+        result = run_agent(req.message, history=history)
+    except RuntimeError as e:
+        raise HTTPException(500, str(e))
+    _SESSIONS[req.session_id] = result["history"]
+    return ChatResponse(reply=result["reply"], tool_trace=result["tool_trace"])
+
+
+@app.post("/api/reset")
+def reset_session(session_id: str = "default"):
+    _SESSIONS.pop(session_id, None)
+    return {"status": "ok"}
+
+
+@app.get("/api/schedule")
+def list_schedule():
+    return {"entries": db.get_all_entries()}
+
+
+@app.get("/api/health")
+def health():
+    return {"status": "ok", "entries": len(db.get_all_entries())}
+
+
+app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+
+
+@app.get("/")
+def root():
+    return FileResponse(str(BASE_DIR / "static" / "index.html"))

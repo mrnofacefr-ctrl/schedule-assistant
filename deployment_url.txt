@@ -1,0 +1,8 @@
+Agentic RAG Schedule Assistant - Deployed URL
+================================================
+
+TODO: paste your live deployment URL here after deploying, e.g.:
+https://your-app.onrender.com
+
+See README.md "Deploy (get your live URL)" for step-by-step instructions
+(Render / Railway / Hugging Face Spaces - all free tiers, ~5 minutes).

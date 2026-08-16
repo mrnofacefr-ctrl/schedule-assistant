@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Schedule Assistant</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #161922; --border: #262b38;
+    --text: #e8eaf0; --muted: #8b91a3; --accent: #6c8cff; --accent-dim: #2a3a6b;
+    --user-bubble: #6c8cff; --bot-bubble: #1e2230;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column;
+  }
+  header {
+    padding: 16px 24px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px;
+  }
+  header .dot { width: 9px; height: 9px; border-radius: 50%; background: #4ade80; }
+  header h1 { font-size: 15px; font-weight: 600; margin: 0; }
+  header span.sub { color: var(--muted); font-size: 12px; margin-left: 6px; }
+
+  #chat {
+    flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 14px;
+    max-width: 760px; width: 100%; margin: 0 auto;
+  }
+  .msg { display: flex; flex-direction: column; max-width: 78%; }
+  .msg.user { align-self: flex-end; align-items: flex-end; }
+  .msg.bot { align-self: flex-start; align-items: flex-start; }
+  .bubble {
+    padding: 10px 14px; border-radius: 14px; line-height: 1.45; font-size: 14.5px;
+    white-space: pre-wrap;
+  }
+  .msg.user .bubble { background: var(--user-bubble); color: white; border-bottom-right-radius: 4px; }
+  .msg.bot .bubble { background: var(--bot-bubble); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+  .trace {
+    font-size: 11px; color: var(--muted); margin-top: 4px; cursor: pointer;
+  }
+  .trace pre {
+    background: #0b0d12; border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px; font-size: 10.5px; overflow-x: auto; margin-top: 4px; color: #9fb0d0;
+  }
+
+  #inputBar {
+    border-top: 1px solid var(--border); padding: 14px 24px 20px;
+    display: flex; justify-content: center;
+  }
+  #inputInner { max-width: 760px; width: 100%; display: flex; gap: 10px; }
+  #msgInput {
+    flex: 1; background: var(--panel); border: 1px solid var(--border); color: var(--text);
+    border-radius: 12px; padding: 12px 14px; font-size: 14.5px; outline: none;
+  }
+  #msgInput:focus { border-color: var(--accent); }
+  #sendBtn {
+    background: var(--accent); border: none; color: white; padding: 0 20px;
+    border-radius: 12px; font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  #sendBtn:disabled { opacity: 0.5; cursor: default; }
+
+  .suggestions { display: flex; flex-wrap: wrap; gap: 8px; max-width: 760px; margin: 0 auto 4px; padding: 0 24px; }
+  .chip {
+    background: var(--panel); border: 1px solid var(--border); color: var(--muted);
+    padding: 6px 12px; border-radius: 999px; font-size: 12.5px; cursor: pointer;
+  }
+  .chip:hover { color: var(--text); border-color: var(--accent); }
+  .typing { color: var(--muted); font-size: 13px; padding: 4px 0; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="dot"></div>
+  <h1>Schedule Assistant<span class="sub">Agentic RAG · ChromaDB + Claude</span></h1>
+</header>
+
+<div id="chat"></div>
+
+<div class="suggestions" id="suggestions">
+  <div class="chip">What do I have scheduled tomorrow?</div>
+  <div class="chip">Am I free Friday afternoon?</div>
+  <div class="chip">Add a meeting on August 20 at 3 PM called Design Review</div>
+  <div class="chip">What's on my calendar this week?</div>
+</div>
+
+<div id="inputBar">
+  <div id="inputInner">
+    <input id="msgInput" type="text" placeholder="Ask about your schedule, or tell me to add/move/cancel something..." />
+    <button id="sendBtn">Send</button>
+  </div>
+</div>
+
+<script>
+const chat = document.getElementById('chat');
+const input = document.getElementById('msgInput');
+const sendBtn = document.getElementById('sendBtn');
+const sessionId = 'sess_' + Math.random().toString(36).slice(2);
+
+function addMessage(role, text, trace) {
+  const wrap = document.createElement('div');
+  wrap.className = 'msg ' + role;
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  bubble.textContent = text;
+  wrap.appendChild(bubble);
+
+  if (trace && trace.length) {
+    const t = document.createElement('div');
+    t.className = 'trace';
+    t.textContent = `\u{1F527} ${trace.map(x => x.tool).join(' \u2192 ')} (click to inspect)`;
+    const pre = document.createElement('pre');
+    pre.style.display = 'none';
+    pre.textContent = JSON.stringify(trace, null, 2);
+    t.onclick = () => { pre.style.display = pre.style.display === 'none' ? 'block' : 'none'; };
+    wrap.appendChild(t);
+    wrap.appendChild(pre);
+  }
+  chat.appendChild(wrap);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+async function send(text) {
+  if (!text.trim()) return;
+  addMessage('user', text);
+  input.value = '';
+  sendBtn.disabled = true;
+
+  const typing = document.createElement('div');
+  typing.className = 'typing';
+  typing.textContent = 'Assistant is thinking...';
+  chat.appendChild(typing);
+  chat.scrollTop = chat.scrollHeight;
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text, session_id: sessionId }),
+    });
+    const data = await res.json();
+    typing.remove();
+    if (!res.ok) {
+      addMessage('bot', 'Error: ' + (data.detail || 'something went wrong'));
+    } else {
+      addMessage('bot', data.reply, data.tool_trace);
+    }
+  } catch (e) {
+    typing.remove();
+    addMessage('bot', 'Network error: ' + e.message);
+  }
+  sendBtn.disabled = false;
+  input.focus();
+}
+
+sendBtn.onclick = () => send(input.value);
+input.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(input.value); });
+document.querySelectorAll('.chip').forEach(chip => {
+  chip.onclick = () => send(chip.textContent);
+});
+
+addMessage('bot', "Hi! I'm your Schedule Assistant. I can look up your meetings, workshops, tasks and appointments for the next 30 days, or add/move/cancel things for you. Try one of the suggestions below, or just ask.");
+</script>
+
+</body>
+</html>

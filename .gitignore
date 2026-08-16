@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.env
+data/schedule.db
+data/chroma/
+.DS_Store
+venv/
