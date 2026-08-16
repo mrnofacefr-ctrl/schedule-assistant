@@ -11,9 +11,9 @@ Run locally:  uvicorn app.main:app --reload --port 8000
 import os
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -27,6 +27,14 @@ app = FastAPI(title="Agentic RAG Schedule Assistant")
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
 )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    # Safety net so the frontend always gets parseable JSON back, even if
+    # something crashes outside the try/except blocks below.
+    return JSONResponse(status_code=500, content={"detail": f"{type(exc).__name__}: {exc}"})
+
 
 # in-memory per-session conversation history (fine for a demo/assignment;
 # swap for redis/db-backed sessions for real multi-user production use)
@@ -61,8 +69,13 @@ def chat(req: ChatRequest):
     history = _SESSIONS.get(req.session_id, [])
     try:
         result = run_agent(req.message, history=history)
-    except RuntimeError as e:
-        raise HTTPException(500, str(e))
+    except Exception as e:
+        # Catch-all: without this, an unhandled exception (bad model name,
+        # Anthropic API error, network blip, etc.) causes FastAPI/Starlette
+        # to return a *plain-text* "Internal Server Error" page instead of
+        # JSON, which breaks the frontend's response.json() call. Always
+        # returning valid JSON here means the UI can show a real error.
+        raise HTTPException(500, f"{type(e).__name__}: {e}")
     _SESSIONS[req.session_id] = result["history"]
     return ChatResponse(reply=result["reply"], tool_trace=result["tool_trace"])
 
