@@ -21,7 +21,7 @@ import anthropic
 
 from app.tools import TOOL_DEFINITIONS, execute_tool
 
-MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929")
+MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5")
 MAX_TOOL_ITERATIONS = 6
 
 
